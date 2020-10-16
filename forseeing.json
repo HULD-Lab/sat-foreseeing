@@ -1,0 +1,23 @@
+    {
+      "satid":"42790",
+      "sat_name":"VZLUSAT-1",
+      "in_des":"2017-036AB",
+      "sat_freq":437240000,
+       "station_name":"Praha",
+       "station_position":[50.100,14.25,20000],
+       "station_freq":437520000,
+       "horizon":"0:34",
+       "data_rate":115000,
+       "polarization":"Linear",
+       "num_passes":10,
+       "timestep":1,
+       "channelstep":5000,
+       "channel_step":false,
+       "baseURL":"https://www.space-track.org",
+       "username":"huldspace123@gmail.com",
+       "password":"Huld12345678910",
+       "header":["Timestamp","Azimuth","Elevation","Uplink frequency","Downlink frequency","Data Rate","Polarization"],
+       "file_name":"passing.csv"  
+    }
+
+
