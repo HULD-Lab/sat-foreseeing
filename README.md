@@ -46,9 +46,13 @@ e.g http://127.0.0.1:5000/get/42790
 ```
 e.g 192.168.99.100:5000/get/42790  #correct IP will be displayed during booting up docker machine
 ``` 
-Will output
+Will output(header has been commented out in the forseeing.py file):
 ```
 Timestamp,Azimuth,Elevation,Uplink frequency,Downlink frequency,Data Rate,Polarization
+```
+The data for the ground station:
+```
+
 1602854300.0,190.05117,0.02312,437230399.16315645,437249600.83684355,115000,Linear
 1602854301.0,190.09171,0.05227,437230403.906763,437249596.093237,115000,Linear
 1602854302.0,190.13239,0.08154,437230408.6995077,437249591.3004923,115000,Linear
