@@ -284,9 +284,9 @@ def save_data(list_of_lists,header,file_name,timestamps):
     data_csv = [list(i) for i in zip(*list_of_lists)]
     i = 0
     n = len(timestamps)
-    with open(file_name, 'w', newline='') as file:
-        write = csv.writer(file)
-        write.writerow(header)
+    #with open(file_name, 'w', newline='') as file:
+        #write = csv.writer(file)
+        #write.writerow(header)
     while i < n:
         with open(file_name, 'a+', newline='') as file:
             write = csv.writer(file)
