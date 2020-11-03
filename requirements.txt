@@ -1,0 +1,12 @@
+astropy==4.1
+click==7.1.2
+ephem==3.7.7.1
+Flask==1.1.2
+freeze==3.0
+itsdangerous==1.1.0
+Jinja2==2.11.2
+MarkupSafe==1.1.1
+numpy==1.19.2
+six==1.15.0
+urllib3==1.25.11
+Werkzeug==1.0.1
