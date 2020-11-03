@@ -14,10 +14,12 @@
        "channelstep":5000,
        "channel_step":false,
        "baseURL":"https://www.space-track.org",
-       "username":"huldspace123@gmail.com",
-       "password":"Huld12345678910",
+       "username":"huld@huld.io",
+       "password":"password",
        "header":["Timestamp","Azimuth","Elevation","Uplink frequency","Downlink frequency","Data Rate","Polarization"],
        "file_name":"passing.csv"  
     }
+
+
 
 
