@@ -1,20 +1,21 @@
+import os
 import urllib, urllib3, http.cookiejar
 import datetime
 import csv
 import ephem
 from astropy import constants as const
 import json
-import sys
 from flask import Flask, request, send_file
 
 app = Flask(__name__)
-
+app.returnFile = True
 
 def loadConfig(file='forseeing.json'):
     '''
     Get config data from json file mentioned in command line
     '''
     if request.json is not None:
+         app.returnFile = False
          return request.json
     else:
         try:
@@ -300,6 +301,9 @@ def save_data(list_of_lists, header, file_name, timestamps):
     '''
     Exporting data in CSV.
     '''
+    #Reset file to avoid file max size overflow
+    if (os.path.isfile(file_name)):
+        os.unlink(file_name)
     data_csv = [list(i) for i in zip(*list_of_lists)]
     i = 0
     n = len(timestamps)
@@ -316,7 +320,11 @@ def save_data(list_of_lists, header, file_name, timestamps):
 def respond_with_file(filename):
     return send_file(filename, mimetype='text/csv')
 
-@app.route("/")
+def respond_from_file(filename):
+    glue = ''
+    return glue.join(open(filename, 'r').readlines())
+
+@app.route("/", methods=['POST'])
 def run():
     '''
     From satellite info and ground station data get the csv containing the timestamps of each time the satellite is in reach as well as
@@ -339,8 +347,11 @@ def run():
     polar = [Gs.polarization] * len(timestamps)
     list_of_lists = [timestamps, azimuths, elevations, TX, RX, rate, polar]
     save_data(list_of_lists, exp.header, exp.file_name, timestamps)
-    return respond_with_file(exp.file_name)
-    return rise_time, set_time
+    if(app.returnFile):
+        return respond_with_file(obj["file_name"])
+    else:
+        return respond_from_file(obj["file_name"])
+    # return rise_time, set_time
 
 
 # rise_time, set_time = run()

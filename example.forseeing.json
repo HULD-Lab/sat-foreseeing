@@ -17,9 +17,5 @@
        "username":"huld@huld.io",
        "password":"password",
        "header":["Timestamp","Azimuth","Elevation","Uplink frequency","Downlink frequency","Data Rate","Polarization"],
-       "file_name":"passing.csv"  
+       "file_name":"passing.csv"
     }
-
-
-
-

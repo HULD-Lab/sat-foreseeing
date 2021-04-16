@@ -2,7 +2,6 @@ astropy==4.1
 click==7.1.2
 ephem==3.7.7.1
 Flask==1.1.2
-freeze==3.0
 itsdangerous==1.1.0
 Jinja2==2.11.2
 MarkupSafe==1.1.1
