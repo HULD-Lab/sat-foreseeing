@@ -1,22 +1,35 @@
 import os
+import sys
 import urllib, urllib3, http.cookiejar
 import datetime
 import csv
 import ephem
 from astropy import constants as const
 import json
+import sys
 from flask import Flask, request, send_file
+from flask import jsonify
+from flask_caching import Cache
+
+config = {
+    "DEBUG": True,  # some Flask specific configs
+    "CACHE_TYPE": "SimpleCache",  # Flask-Caching related configs
+    "CACHE_DEFAULT_TIMEOUT": 3600
+}
 
 app = Flask(__name__)
-app.returnFile = True
+
+# tell Flask to use the above defined config
+app.config.from_mapping(config)
+cache = Cache(app)
+
 
 def loadConfig(file='forseeing.json'):
     '''
-    Get config data from json file mentioned in command line
+    Get config data. If POST request contains any data => return, otherwise load a file
     '''
     if request.json is not None:
-         app.returnFile = False
-         return request.json
+        return request.json
     else:
         try:
             with open(file) as myfile:
@@ -26,7 +39,19 @@ def loadConfig(file='forseeing.json'):
     return result
 
 
-class Sat_info(object):
+class Pass(object):
+
+    def __init__(self, rise_t, high_t, set_t):
+        self.rise_time = rise_t
+        self.high_time = high_t
+        self.set_time = set_t
+
+    @property
+    def length(self):
+        return ((self.set_time - self.rise_time).seconds) / 60
+
+
+class Satinfo(object):
     '''
     Sets objects from json file for satellite config
     '''
@@ -34,11 +59,13 @@ class Sat_info(object):
     def __init__(self, obj):
         self.satid = str(obj['satid'])
         self.sat_name = str(obj['sat_name'])
-        self.in_des = str(obj['in_des'])
-        self.sat_freq = int(obj['sat_freq'])  # [Hz]
+        self.sat_tx_freq = int(obj['sat_tx_freq'])  # [Hz]
+
+    def __repr__(self):
+        return f"{self.__class__.__name__},{self.satid},{self.sat_name},{self.sat_tx_freq}"
 
 
-class Station_conf(object):
+class Stationconf(object):
     '''
     Sets objects from json file for ground station config
     '''
@@ -46,15 +73,18 @@ class Station_conf(object):
     def __init__(self, obj):
         self.station_name = str(obj['station_name'])
         self.station_position = list(obj['station_position'])
+        print(f"Station position is: {self.station_position[0]}, {self.station_position[1]}", file=sys.stderr)
         self.horizon = str(obj['horizon'])
         self.date_pred = datetime.datetime.utcnow()
-        self.station_freq = int(obj['station_freq'])  # [Hz]
-        self.data_rate = int(obj['data_rate'])
-        self.polarization = str(obj['polarization'])
+        self.station_tx_freq = int(obj['station_tx_freq'])  # [Hz]
         self.num_passes = int(obj['num_passes'])
         self.timestep = int(obj['timestep'])
-        self.channelstep = int(obj['channelstep'])
-        self.channel_step = obj['channel_step']
+        self.channel_step = int(obj['channel_step'])
+        self.use_channel_step = obj['use_channel_step']
+
+    def __repr__(self):
+        # WARNING: self.date_pred removed from Class so repr string can be used for CACHING but it could be a potential ISSUE if CACHING on calc will be for longer period, i.e more than 60 secs
+        return f"{self.__class__.__name__},{self.station_name},{self.timestep},{self.station_position},{self.horizon},{self.station_tx_freq},{self.num_passes},{self.channel_step}, {self.use_channel_step}"
 
 
 class Credentials(object):
@@ -63,9 +93,12 @@ class Credentials(object):
     '''
 
     def __init__(self, obj):
-        self.baseURL = str(obj['baseURL'])
+        self.baseurl = str(obj['baseURL'])
         self.username = str(obj['username'])
         self.password = str(obj['password'])
+
+    def __repr__(self):
+        return f"{self.__class__.__name__},{self.baseurl},{self.username},{self.password}"
 
 
 class csv_sheet(object):
@@ -76,6 +109,9 @@ class csv_sheet(object):
     def __init__(self, obj):
         self.header = list(obj['header'])
         self.file_name = str(obj['file_name'])
+
+    def __repr__(self):
+        return f"{self.__class__.__name__},{self.header},{self.file_name}"
 
 
 def datetime_from_time(tr):
@@ -97,10 +133,16 @@ def angle_format(angle):
     return angle_format
 
 
-def Get_TLE(satid, username, password, baseURL):
+@cache.memoize(timeout=3600)
+def get_tle(satid, username, password, baseURL):
     '''
     Getting the latest TLE data with the satellite ID as input from the website https://www.space-track.org/
     '''
+    ctime = datetime.datetime.now()
+    vtime = datetime.datetime.now() + datetime.timedelta(hours=1)
+    print(
+        f"TLE downloading for {satid} triggered at {ctime.strftime('%Y-%m-%d %H:%M:%S')} GMT and cached until {vtime.strftime('%Y-%m-%d %H:%M:%S')} GMT",
+        file=sys.stderr)
     cj = http.cookiejar.CookieJar()
     opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
     parameters = urllib.parse.urlencode({'identity': username, 'password': password}).encode("utf-8")
@@ -114,7 +156,23 @@ def Get_TLE(satid, username, password, baseURL):
     return TLE_line
 
 
-def predict_pass(station_position, horizon, date_pred, TLE_line):
+def get_station_observer(station_position, horizon):
+    station = ephem.Observer()
+    station.lat = station_position[0]
+    station.lon = station_position[1]
+    station.elevation = station_position[2]
+    station.horizon = horizon
+    print(f"Station observer instantiated", file=sys.stderr)
+    return station
+
+
+def get_satellite_body(tle):
+    satellite_body = ephem.readtle("SAT", tle[0], tle[1])
+    print(f"Satellite body instantiated", file=sys.stderr)
+    return satellite_body
+
+
+def predict_pass(station_observer, satellite_body, date_pred):
     '''
     The prediction of the passes are made by using the pyephem libraries,
     The mathematical steps for realising this are usually following:
@@ -128,21 +186,20 @@ def predict_pass(station_position, horizon, date_pred, TLE_line):
     Pyephem allows to define the ground station with its different properties.
     The Satellite object is defined with the TLE data as input.
     '''
-    station = ephem.Observer()
-    station.lat = station_position[0]
-    station.lon = station_position[1]
-    station.elevation = station_position[2]
-    station.horizon = horizon
-    station.date = date_pred
-    sate = ephem.readtle("SAT", TLE_line[0], TLE_line[1])
-    tr, azr, tt, altt, ts, azs = station.next_pass(sate)
+
+    print(
+        f"PREDICTING: for GS Station position @: {station_observer.lat}, {station_observer.lon}, and PASS AFTER: {date_pred.strftime('%Y-%m-%d %H:%M:%S')}",
+        file=sys.stderr)
+    station_observer.date = date_pred
+    tr, azr, tt, altt, ts, azs = station_observer.next_pass(satellite_body)
     rise_time = datetime_from_time(tr)
     set_time = datetime_from_time(ts)
     high_time = datetime_from_time(tt)
-    return rise_time, set_time, high_time, station, sate
+    return rise_time, set_time, high_time,
+    # return rise_time, set_time, high_time, satelite_body, station
 
 
-def get_passes(station, date_pred, num_passes, timestep, station_position, horizon, TLE_line):
+def get_passes(date_pred, num_passes, timestep, station_observer, satellite_body):
     '''
     From the ground station data and using the predict_pass() computing the all the timestamps when the stellite is visbile for N amount passes.
     '''
@@ -152,9 +209,10 @@ def get_passes(station, date_pred, num_passes, timestep, station_position, horiz
     rise_times = []
     set_times = []
     high_times = []
+    tmstmp_per_predict = []
     predict_time = date_pred
     while i < num_passes:
-        rise_time, set_time, high_time, station, sate = predict_pass(station_position, horizon, predict_time, TLE_line)
+        rise_time, set_time, high_time = predict_pass(station_observer, satellite_body, predict_time)
         add_stamp = datetime.datetime.timestamp(rise_time + datetime.timedelta(seconds=1))
         end_stamp = datetime.datetime.timestamp(set_time)
         rise_times.append(rise_time)
@@ -164,12 +222,14 @@ def get_passes(station, date_pred, num_passes, timestep, station_position, horiz
             timestamps.append(add_stamp)
             j += 1
             add_stamp = add_stamp + timestep
+        # set time for next prediction
         predict_time = set_time + datetime.timedelta(seconds=1)
         i += 1
-    return timestamps, rise_times, set_times, high_times
+        tmstmp_per_predict.append(j)
+    return timestamps, rise_times, set_times, high_times, tmstmp_per_predict
 
 
-def get_az_el(timestamps, station, sate):
+def get_az_el(timestamps, observer_station, sat_body):
     '''
     With pyephem computing azimuths angles and elevation for each timestamp.
     '''
@@ -181,21 +241,22 @@ def get_az_el(timestamps, station, sate):
     i = 0
     while i < n:
         thetimestamp = timestamps[i]
-        station.date = datetime.datetime.fromtimestamp(thetimestamp)
-        sate.compute(station)
-        azimuths.insert(i, angle_format(sate.az))
-        elevations.insert(i, angle_format(sate.alt))
-        satlat.insert(i, sate.sublat)
-        satlong.insert(i, sate.sublong)
+        observer_station.date = datetime.datetime.fromtimestamp(thetimestamp)
+        sat_body.compute(observer_station)
+        azimuths.insert(i, angle_format(sat_body.az))
+        elevations.insert(i, angle_format(sat_body.alt))
+        satlat.insert(i, sat_body.sublat)
+        satlong.insert(i, sat_body.sublong)
         i += 1
-    return azimuths, elevations, timestamps, station, sate
+    return azimuths, elevations
 
 
-def calcDopler(timestamps, set_times, high_times, station, sate, sat_freq, channel_step, channelstep):
+def calc_doppler(timestamps, set_times, high_times, station, sate, sat_freq, use_channel_step, channel_step):
     '''
     Computing the doppler effect of the satellite communication and the correction frequency of the ground station.
     '''
     dopplerfreq = []
+    dopplerfreq100mhz = []
     RX = []
     TX = []
     n = len(timestamps)
@@ -237,11 +298,15 @@ def calcDopler(timestamps, set_times, high_times, station, sate, sat_freq, chann
         elev the elevation angle given by pyephem: alt [°]
         '''
         doppler_freq = v_r * sat_freq / const.c.value
+        doppler_freq100mhz = v_r * 100_000_000 / const.c.value
         dopplerfreq.insert(i, doppler_freq)
+        dopplerfreq100mhz.append(doppler_freq100mhz)
         i += 1
     i = 0
     j = 0
-    if channel_step == False:
+
+    # TODO: can be extracted do a dedicated method -> REFACTOR
+    if use_channel_step == False:
         while i < n:
 
             if timestamps[i] > datetime.datetime.timestamp(set_times[j]):
@@ -264,21 +329,21 @@ def calcDopler(timestamps, set_times, high_times, station, sate, sat_freq, chann
     else:
         while i < n:
 
-            if dopplerfreq[i] > 3 * channelstep / 2:
-                TX.insert(i, sat_freq - 2 * channelstep)
-                RX.insert(i, sat_freq + 2 * channelstep)
-            if dopplerfreq[i] > channelstep / 2:
-                TX.insert(i, sat_freq - channelstep)
-                RX.insert(i, sat_freq + channelstep)
-            if dopplerfreq[i] > - channelstep / 2:
+            if dopplerfreq[i] > 3 * channel_step / 2:
+                TX.insert(i, sat_freq - 2 * channel_step)
+                RX.insert(i, sat_freq + 2 * channel_step)
+            if dopplerfreq[i] > channel_step / 2:
+                TX.insert(i, sat_freq - channel_step)
+                RX.insert(i, sat_freq + channel_step)
+            if dopplerfreq[i] > - channel_step / 2:
                 TX.insert(i, sat_freq)
                 RX.insert(i, sat_freq)
-            if dopplerfreq[i] > - 3 * channelstep / 2:
-                TX.insert(i, sat_freq + channelstep)
-                RX.insert(i, sat_freq - channelstep)
+            if dopplerfreq[i] > - 3 * channel_step / 2:
+                TX.insert(i, sat_freq + channel_step)
+                RX.insert(i, sat_freq - channel_step)
             else:
-                TX.insert(i, sat_freq + 2 * channelstep)
-                RX.insert(i, sat_freq - 2 * channelstep)
+                TX.insert(i, sat_freq + 2 * channel_step)
+                RX.insert(i, sat_freq - 2 * channel_step)
             i += 1
 
         '''
@@ -294,35 +359,106 @@ def calcDopler(timestamps, set_times, high_times, station, sate, sat_freq, chann
 
         '''
 
-    return dopplerfreq, RX, TX
+    return dopplerfreq, RX, TX, dopplerfreq100mhz
 
 
-def save_data(list_of_lists, header, file_name, timestamps):
+def save_data(list_of_lists, header, file_name):
     '''
     Exporting data in CSV.
     '''
-    #Reset file to avoid file max size overflow
+    # Reset file to avoid file max size overflow
     if (os.path.isfile(file_name)):
         os.unlink(file_name)
     data_csv = [list(i) for i in zip(*list_of_lists)]
-    i = 0
-    n = len(timestamps)
-    # with open(file_name, 'w', newline='') as file:
-    # write = csv.writer(file)
-    # write.writerow(header)
-    while i < n:
-        with open(file_name, 'a+', newline='') as file:
-            write = csv.writer(file)
-            # print(data_csv)
-            write.writerow(data_csv[i])
-        i += 1
+
+    with open(file_name, 'w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(header)
+        for item in data_csv:
+            writer.writerow(item)
+
 
 def respond_with_file(filename):
     return send_file(filename, mimetype='text/csv')
 
+
 def respond_from_file(filename):
     glue = ''
     return glue.join(open(filename, 'r').readlines())
+
+
+def build_track_obj(timestamps, azimuths, elevations, doppfreq100mhz, npasses, it_per_pass):
+    id_start = 0
+    track_all = []
+    for pass_no in range(npasses):
+        id_end = it_per_pass[pass_no]
+        elems = [{'ts': timestamps[id_start + i], 'az': azimuths[id_start + i], 'el': elevations[id_start + i],
+                  'dp': doppfreq100mhz[id_start + i]} for i, _ in enumerate(timestamps[id_start:id_end])]
+        id_start = id_end
+        track = {'track': elems}
+        track_all.append(track)
+    return track_all
+
+
+@cache.memoize(timeout=30)
+def calc_data(Sat, Gs, Cr, File_output):
+    print(
+        f"Calc data for {Sat.satid} and station {Gs.station_name} triggered at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}GMT",
+        file=sys.stderr)
+
+    # Init bodies
+    tle_line = get_tle(Sat.satid, Cr.username, Cr.password, Cr.baseurl)
+    gs_observer = get_station_observer(Gs.station_position, Gs.horizon)
+    sat_body = get_satellite_body(tle_line)
+
+    # Calculate passes
+    timestamps, rise_times, set_times, high_times, tmstmp_per_predict = get_passes(Gs.date_pred, Gs.num_passes,
+                                                                                   Gs.timestep,
+                                                                                   gs_observer, sat_body)
+    print(f"Passes calculated, n-points: {len(timestamps)}", file=sys.stderr)
+
+    # Get azimuths and elevations for given passes
+    azimuths, elevations = get_az_el(timestamps, gs_observer, sat_body)
+    print(f"AZIMUTH, ELEV calculated: n-points: {len(azimuths)}, {len(elevations)}", file=sys.stderr)
+
+    # Calculate doppler frequency
+    dopplerfreq, RX, TX, doppfreq100mhz = calc_doppler(timestamps, set_times, high_times, gs_observer, sat_body,
+                                                       Sat.sat_tx_freq, Gs.use_channel_step,
+                                                       Gs.channel_step)
+    print(f"DOPPLER calculated", file=sys.stderr)
+
+    # Adaption of format on output to conform to API
+    track_data = build_track_obj(timestamps, azimuths, elevations, doppfreq100mhz, Gs.num_passes, tmstmp_per_predict)
+    print(f"API compliant object built", file=sys.stderr)
+
+    # EXPORT to file
+    list_of_lists = [timestamps, azimuths, elevations, TX, RX]
+    save_data(list_of_lists, File_output.header, File_output.file_name)
+    print(f"STORED into : {File_output.file_name}", file=sys.stderr)
+
+    return track_data
+
+
+def load_setup():
+    obj = loadConfig()
+    Sat = Satinfo(obj)
+    Gs = Stationconf(obj)
+    Cr = Credentials(obj)
+    csv_file = csv_sheet(obj)
+    return {'sat': Sat, 'gs': Gs, 'cred': Cr, 'f_out': csv_file}
+
+
+def get_pass_info(num_passes, station_observer, satellite_body, first_predict_time):
+    predict_time = first_predict_time
+    passes = []
+    for i in range(num_passes):
+        rise_time, set_time, high_time = predict_pass(station_observer, satellite_body, predict_time)
+        pass_info = Pass(rise_time, high_time, set_time)
+        predict_time = set_time + datetime.timedelta(seconds=1)
+        passes.append(pass_info)
+        print(f"DONE: pass N={i} ")
+    return passes
+
 
 @app.route("/", methods=['POST'])
 def run():
@@ -330,37 +466,47 @@ def run():
     From satellite info and ground station data get the csv containing the timestamps of each time the satellite is in reach as well as
     the azimuth angle, elevation, correction frequency from the doppler effect for uplink and downlink, the data rate and the polarization.
     '''
-    obj = loadConfig()
-    Sat = Sat_info(obj)
-    Gs = Station_conf(obj)
-    Cr = Credentials(obj)
-    exp = csv_sheet(obj)
-    TLE_line = Get_TLE(Sat.satid, Cr.username, Cr.password, Cr.baseURL)
-    rise_time, set_time, high_time, station, sate = predict_pass(Gs.station_position, Gs.horizon, Gs.date_pred,
-                                                                 TLE_line)
-    timestamps, rise_times, set_times, high_times = get_passes(station, Gs.date_pred, Gs.num_passes, Gs.timestep,
-                                                               Gs.station_position, Gs.horizon, TLE_line)
-    azimuths, elevations, timestamps, station, sate = get_az_el(timestamps, station, sate)
-    dopplerfreq, RX, TX = calcDopler(timestamps, set_times, high_times, station, sate, Sat.sat_freq, Gs.channel_step,
-                                     Gs.channelstep)
-    rate = [Gs.data_rate] * len(timestamps)
-    polar = [Gs.polarization] * len(timestamps)
-    list_of_lists = [timestamps, azimuths, elevations, TX, RX, rate, polar]
-    save_data(list_of_lists, exp.header, exp.file_name, timestamps)
-    if(app.returnFile):
-        return respond_with_file(obj["file_name"])
-    else:
-        return respond_from_file(obj["file_name"])
+    setup = load_setup()
+    track_data = calc_data(setup["sat"], setup["gs"], setup["cred"], setup["f_out"])
+
+    return jsonify(track_data)
+    # return respond_from_file(exp.file_name)
     # return rise_time, set_time
+
+
+@app.route("/bounds", methods=['POST'])
+def get_bounds():
+    setup = load_setup()
+
+    # Init bodies
+    Sat = setup["sat"]
+    Gs = setup["gs"]
+    Cr = setup["cred"]
+    tle_line = get_tle(Sat.satid, Cr.username, Cr.password, Cr.baseurl)
+    gs_observer = get_station_observer(Gs.station_position, Gs.horizon)
+    sat_body = get_satellite_body(tle_line)
+
+    passes = get_pass_info(Gs.num_passes, gs_observer, sat_body, Gs.date_pred)
+
+    boundaries = []
+    for item in passes:
+        pass_boundary = {}
+        pass_boundary["satid"] = Sat.satid
+        pass_boundary["rise_time"] = datetime.datetime.timestamp(item.rise_time)
+        pass_boundary["set_time"] = datetime.datetime.timestamp(item.set_time)
+        pass_boundary["duration"] = item.length
+
+        boundaries.append(pass_boundary)
+
+    return jsonify(boundaries)
 
 
 # rise_time, set_time = run()
 # print(rise_time, set_time)
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=8000, debug=True)
+    app.run(host='0.0.0.0', port=8383, debug=True)
     # run()
 
 # https://space.stackexchange.com/questions/4339/calculating-which-satellite-passes-are-visible
 # https://rhodesmill.org/pyephem/
 # https://ntlrepository.blob.core.windows.net/lib/59000/59300/59358/DOT-VNTSC-FAA-16-12.pdf
-

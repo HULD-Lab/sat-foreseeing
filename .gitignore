@@ -1,3 +1,4 @@
-.idea/
-forseeing.json
 passing.csv
+.idea
+__pycache__
+forseeing.json

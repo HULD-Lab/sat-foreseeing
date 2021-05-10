@@ -36,15 +36,15 @@ docker-compose up
 
 ## Connection to the API
 ```
-<docker IP>:8000/get/<NORAD_ID>
+<docker IP>:8383/get/<NORAD_ID>
 ```
 **On Linux**
 ```
-e.g http://127.0.0.1:8000/get/42790
+e.g http://127.0.0.1:8383/get/42790
 ```
 **On Windows** version XP,7,8 (i.e. without shell sub-system)
 ```
-e.g 192.168.99.100:8000/get/42790  #correct IP will be displayed during booting up docker machine
+e.g 192.168.99.100:8383/get/42790  #correct IP will be displayed during booting up docker machine
 ``` 
 
 Will output(header has been commented out in the forseeing.py file):
