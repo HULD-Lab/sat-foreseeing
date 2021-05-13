@@ -1,6 +1,6 @@
 import os
 import sys
-import urllib, urllib3, http.cookiejar
+import urllib, http.cookiejar
 import datetime
 import csv
 import ephem
@@ -295,7 +295,7 @@ def calc_doppler(timestamps, set_times, high_times, station, sate, sat_freq, use
     i = 0
     j = 0
 
-    #TODO: can be extracted do a dedicated method -> REFACTOR
+    #TODO: can be extracted to a dedicated method -> REFACTOR
     if use_channel_step == False:
         while i < n:
 
@@ -409,7 +409,7 @@ def calc_data(Sat, Gs, Cr, File_output):
                                      Gs.channel_step)
     print(f"DOPPLER calculated", file=sys.stderr)                                     
 
-    # Adaption of format on output to conform to API
+    # Adaptation of format on output to conform to API
     track_data = build_track_obj(timestamps,azimuths, elevations, doppfreq100mhz,Gs.num_passes, tmstmp_per_predict)
     print(f"API compliant object built", file=sys.stderr)                                     
     
@@ -488,7 +488,8 @@ def get_bounds():
 # rise_time, set_time = run()
 # print(rise_time, set_time)
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=8383, debug=True)
+    print("DEVELOPMENT server disabled, use UWSGI")
+    #app.run(host='0.0.0.0', port=8383, debug=True)
     # run()
 
 # https://space.stackexchange.com/questions/4339/calculating-which-satellite-passes-are-visible

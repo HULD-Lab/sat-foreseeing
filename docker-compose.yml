@@ -6,6 +6,7 @@ services:
     app:
         build: .
         ports:
-            - "8000:8000"
+            - "8383:8383"
+            - "9192:9192"
         networks:
             - app-tier
