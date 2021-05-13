@@ -51,7 +51,7 @@ class Pass(object):
 
     @property
     def length(self):
-        return ((self.set_time - self.rise_time).seconds)/60
+        return ((self.set_time - self.rise_time).seconds)
 
 class Satinfo(object):
     '''
