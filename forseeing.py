@@ -380,7 +380,7 @@ def build_track_obj(timestamps,azimuths, elevations, doppfreq100mhz, npasses, it
     track_all = []
     for pass_no in range(npasses):
         id_end = it_per_pass[pass_no]    
-        elems = [{'ts': timestamps[id_start+i], 'az': azimuths[id_start+i], 'el': elevations[id_start+i], 'dp': doppfreq100mhz[id_start+i]} for i, _ in enumerate(timestamps[id_start:id_end])]
+        elems = [{'ts': timestamps[id_start+i], 'az': azimuths[id_start+i], 'el': elevations[id_start+i], 'dc': doppfreq100mhz[id_start+i]} for i, _ in enumerate(timestamps[id_start:id_end])]
         id_start = id_end 
         track = { 'track': elems}
         track_all.append(track)
