@@ -290,7 +290,7 @@ def calc_doppler(timestamps, set_times, high_times, station, sate, sat_freq, use
         doppler_freq = v_r * sat_freq / const.c.value
         doppler_freq100mhz = v_r * 100_000_000 / const.c.value
         dopplerfreq.insert(i, doppler_freq)
-        dopplerfreq100mhz.append(doppler_freq100mhz)
+        dopplerfreq100mhz.append((-1)*doppler_freq100mhz)
         i += 1
     i = 0
     j = 0
